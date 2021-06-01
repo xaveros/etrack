@@ -29,10 +29,10 @@ class TrackingResult(object):
         self.height_pix = height_pixel
         self.height_m = height_meter
         self.x_factor = self.width_m / self.width_pix # m/pix
-        self.x_factor = self.height_m / self.height_pix # m/pix
+        self.y_factor = self.height_m / self.height_pix # m/pix
 
         self.center = (np.round(self.x_0 + self.width_pix/2), np.round(self.y_0 + self.height_pix/2))
-        self.center_meter = ((self.center[0] - x_0) * self.x_factor, (self.centerenter[1] - y_0) * self.y_factor)
+        self.center_meter = ((self.center[0] - self.x_0) * self.x_factor, (self.center[1] - self.y_0) * self.y_factor)
 
         self._data_frame = pd.read_hdf(results_file)
         self._level_shape = self._data_frame.columns.levshape
