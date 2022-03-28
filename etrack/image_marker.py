@@ -1,4 +1,6 @@
+from cv2 import calibrationMatrixValues
 import matplotlib.pyplot as plt 
+import numpy as np
 import cv2
 import os
 import sys
@@ -19,6 +21,19 @@ class ImageMarker:
         self._fig.canvas.mpl_connect('key_press_event', self._key_press_event)
     
     def mark_movie(self, filename, frame_number=0):
+        """ Interactive GUI to mark the corners of the tank. A specific frame of the video can be chosen. Returns marker positions.
+
+        Args:
+            filename: Videofile
+            frame_number (int, optional): Number of a frame in the videofile. Defaults to 0.
+
+        Raises:
+            IOError: File does not exist.
+
+        Returns:
+            marker_positions: Marker positions of tank corners.
+        """
+        
         if not os.path.exists(filename):
             raise IOError("file %s does not exist!" % filename)
         video = cv2.VideoCapture()
@@ -26,17 +41,17 @@ class ImageMarker:
         frame_counter = 0
         success = True
         frame = None
-        while success and frame_counter <= frame_number:
+        while success and frame_counter <= frame_number:    # iterating until frame_counter == frame_number --> success (True)
             print("Reading frame: %i" % frame_counter, end="\r")
             success, frame = video.read()
             frame_counter += 1
         if success:
-           self._fig.gca().imshow(frame)
+           self._fig.gca().imshow(frame)    # plot wanted frame of video
         else:
            print("Could not read frame number %i either failed to open movie or beyond maximum frame number!" % frame_number)
            return []
-        plt.ion()
-        plt.show(block=False)
+        plt.ion()   # turn on interactive mode
+        plt.show(block=False)   # block=False allows to continue interact in terminal while the figure is open
         
         self._task_index = -1
         if len(self._tasks) > 0:
@@ -50,6 +65,7 @@ class ImageMarker:
         self._fig.gca().set_title("All set and done!\n Window will close in 2s")
         self._fig.canvas.draw()
         plt.pause(2.0)
+        plt.close()
         return [t.marker_positions for t in self._tasks]
 
     def _key_press_event(self, event):
@@ -141,11 +157,15 @@ class MarkerTask():
 if __name__ == "__main__":
     tank_task = MarkerTask("tank limits", ["bottom left corner", "top left corner", "top right corner", "bottom right corner"], "Mark tank corners")
     feeder_task = MarkerTask("Feeder positions", list(map(str, range(1, 2))), "Mark feeder positions")
-    tasks = [tank_task, feeder_task]
+    tasks = [tank_task] # feeder_task]
     im = ImageMarker(tasks)
-    # vid1 = "2020.12.11_lepto48DLC_resnet50_boldnessDec11shuffle1_200000_labeled.mp4"
-    print(sys.argv[0])
-    print (sys.argv[1])
-    vid1 = sys.argv[1]
-    marker_positions = im.mark_movie(vid1, 10)
+
+    vid1 = "/home/efish/efish_tracking/efish_tracking3-Xaver-2022-03-21/videos/2022.01.12_3DLC_resnet50_efish_tracking3Mar21shuffle1_300000_labeled.mp4"
+    marker_positions = im.mark_movie(vid1, 100)
     print(marker_positions)
+    
+    # print(sys.argv[0])
+    # print (sys.argv[1])
+    # vid1 = sys.argv[1]
+    
+    embed()
