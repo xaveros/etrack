@@ -17,8 +17,19 @@ center_meter = ((center[0] - x_0) * x_factor, (center[1] - y_0) * y_factor)
 
 class TrackingResult(object):
     
-    def __init__(self, results_file, x_0=0, y_0= 0, width_pixel=1230, height_pixel=1100, width_meter=0.81, height_meter=0.81) -> None:
+    def __init__(self, results_file, x_0=0, y_0= 0, width_pixel=1975, height_pixel=1375, width_meter=0.81, height_meter=0.81) -> None:
         super().__init__()
+        """Width refers to the "x-axis" of the tank, height to the "y-axis" of it. 
+
+        Args:
+            results_file (_type_): Results file of the before done animal tracking.
+            x_0 (int, optional): . Defaults to 95.
+            y_0 (int, optional): _description_. Defaults to 185.
+            width_pixel (int, optional): Width from one lightened corner of the tank to the other. Defaults to 1975.
+            height_pixel (int, optional): Heigth from one lightened corner of the tank to the other.  Defaults to 1375.
+            width_meter (float, optional): Width of the tank in meter. Defaults to 0.81.
+            height_meter (float, optional): Height of the tank in meter. Defaults to 0.81.
+        """
         if not os.path.exists(results_file):
             raise ValueError("File %s does not exist!" % results_file)
         self._file_name = results_file
@@ -28,36 +39,51 @@ class TrackingResult(object):
         self.width_m = width_meter
         self.height_pix = height_pixel
         self.height_m = height_meter
-        self.x_factor = self.width_m / self.width_pix # m/pix
+        self.x_factor = self.width_m / self.width_pix   # m/pix
         self.y_factor = self.height_m / self.height_pix # m/pix
 
-        self.center = (np.round(self.x_0 + self.width_pix/2), np.round(self.y_0 + self.height_pix/2))
-        self.center_meter = ((self.center[0] - self.x_0) * self.x_factor, (self.center[1] - self.y_0) * self.y_factor)
+        self.center = (np.round(self.x_0 + self.width_pix/2), np.round(self.y_0 + self.height_pix/2))   # middle of width and height --> center
+        self.center_meter = ((self.center[0] - self.x_0) * self.x_factor, (self.center[1] - self.y_0) * self.y_factor)  # center in meter by multipling with factor
 
-        self._data_frame = pd.read_hdf(results_file)
-        self._level_shape = self._data_frame.columns.levshape
-        self._scorer = self._data_frame.columns.levels[0].values
-        self._bodyparts = self._data_frame.columns.levels[1].values if self._level_shape[1] > 0 else []
-        self._positions = self._data_frame.columns.levels[2].values if self._level_shape[2] > 0 else []
+        self._data_frame = pd.read_hdf(results_file)    # read dataframe of scorer
+        self._level_shape = self._data_frame.columns.levshape   # shape of dataframe (?)
+        self._scorer = self._data_frame.columns.levels[0].values    # scorer of dataset
+        self._bodyparts = self._data_frame.columns.levels[1].values if self._level_shape[1] > 0 else [] # tracked body parts 
+        self._positions = self._data_frame.columns.levels[2].values if self._level_shape[2] > 0 else [] # position in x and y values and the likelihood of it
 
-    def angle_to_center(self, bodypart=0, twopi=True, origin="topleft", min_likelihood=0.95):
-        if  isinstance(bodypart, nb.Number):
-            bp = self._bodyparts[bodypart]
-        elif isinstance(bodypart, str) and bodypart in self._bodyparts:
+    def angle_to_center(self, bodypart=0, twopi=True, inversed_yaxis=False, min_likelihood=0.95):
+        """Angel of animal position in relation to the center of the tank.
+
+        Args:
+            bodypart (int, optional): Bodypart of the animal. Defaults to 0.
+            twopi (bool, optional): _description_. Defaults to True.
+            inversed_yaxis (bool, optional): Inversed y-axis = True when 0 is at the top of axis. Defaults to False.
+            min_likelihood (float, optional): The likelihood of the position estimation. Defaults to 0.95.
+
+        Raises:
+            ValueError: No valid x-position values. 
+
+        Returns:
+            phi: Angle of animal in relation to center.
+        """
+        if  isinstance(bodypart, nb.Number):    # check if the instance bodypart of this class is a number
+            bp = self._bodyparts[bodypart]  
+        elif isinstance(bodypart, str) and bodypart in self._bodyparts: # or if bodypart is a string
             bp = bodypart
         else:
-            raise ValueError("Bodypart %s is not in dataframe!" % bodypart)
-        _, x, y, _, _ = self.position_values(bodypart=bp, min_likelihood=min_likelihood)
+            raise ValueError("Bodypart %s is not in dataframe!" % bodypart) # or if it is existing
+        _, x, y, _, _ = self.position_values(bodypart=bp, min_likelihood=min_likelihood)    # set x and y values, already in meter from position_values
         if x is None:
             print("Error: no valid angles for %s" % self._file_name)
             return []
-        x_meter = x - self.center_meter[0]
-        y_meter = y - self.center_meter[1]
-        if origin.lower() == "topleft":
-            y_meter *= -1
-        phi = np.arctan2(y_meter, x_meter) * 180 / np.pi
+        x_to_center = x - self.center_meter[0]  # 
+        y_to_center = y - self.center_meter[1]
+        if inversed_yaxis == True:
+            y_to_center *= -1
+        phi = np.arctan2(y_to_center, x_to_center) * 180 / np.pi
         if twopi:
             phi[phi < 0] = 360 + phi[phi < 0]
+        
         return phi
 
     def coordinate_transformation(self, position):
@@ -85,24 +111,24 @@ class TrackingResult(object):
     def positions(self):
         return self._positions
 
-    def position_values(self, scorer=0, bodypart=0, framerate=30, interpolate=True, min_likelihood=0.95):
-        """returns the x and y positions in m and the likelihood of the positions.
+    def position_values(self, scorer=0, bodypart=0, framerate=25, interpolate=True, min_likelihood=0.95):
+        """Returns the x and y positions of a bodypart over time and the likelihood of it.
 
         Args:
-            scorer (int, optional): [description]. Defaults to 0.
-            bodypart (int, optional): [description]. Defaults to 0.
-            framerate (int, optional): [description]. Defaults to 30.
+            scorer (int, optional): Scorer of dataset. Defaults to 0.
+            bodypart (int, optional): Bodypart of the animal. Can be seen in etrack.TrackingResults.bodyparts. Defaults to 0.
+            framerate (int, optional): Framerate of the video. Defaults to 25.
 
         Raises:
-            ValueError: [description]
-            ValueError: [description]
+            ValueError: Scorer not existing in dataframe.
+            ValueError: Bodypart not existing in dataframe. 
 
         Returns:
-            time [np.array]: the time axis
-            x [np.array]: the x-position in m 
-            y [np.array]: the y-position in m
-            l [np.array]: the likelihood of the position estimation
-            bp string: the body part
+            time [np.array]: The time axis.
+            x [np.array]: x-position in meter.
+            y [np.array]: y-position in meter.
+            l [np.array]: The likelihood of the position estimation. Originating from animal tracking done before. 
+            bp string: The body part of the animal.
             [type]: [description]
         """
 
@@ -136,7 +162,16 @@ class TrackingResult(object):
         y3 = np.interp(time, time2, y2)
         return time, x3, y3, l, bp
 
-    def plot(self, scorer=0, bodypart=0, threshold=0.9, framerate=30):
+
+    def plot(self, scorer=0, bodypart=0, threshold=0.9, framerate=25):
+        """Plot the position of a bodypart in the tank over time.
+
+        Args:
+            scorer (int, optional): Scorer of dataset. Defaults to 0.
+            bodypart (int, optional): Given bodypart to plot. Defaults to 0.
+            threshold (float, optional): Threshold below which the likelihood has to be. Defaults to 0.9.
+            framerate (int, optional): Framerate of the video. Defaults to 25.
+        """
         t, x, y, l, name  = self.position_values(scorer=scorer, bodypart=bodypart, framerate=framerate)
         plt.scatter(x[l > threshold], y[l > threshold], c=t[l > threshold], label=name)
         plt.scatter(self.center_meter[0], self.center_meter[1], marker="*")
@@ -148,31 +183,36 @@ class TrackingResult(object):
         bar.set_label("time [s]")
         plt.legend()
         plt.show()
-        from IPython import embed
-
+        
+        pass
 
 if __name__ == '__main__':
     from IPython import embed
-    filename = "2020.12.04_lepto48DLC_resnet50_boldnessDec11shuffle1_200000.h5"
-    path = "/mnt/movies/merle_verena/boldness/labeled_videos/day_4/"
-    tr = TrackingResult(path+filename)
-    time, x, y, l, bp = tr.position_values(bodypart=2)
+    filename = "/2022.01.12_3DLC_resnet50_efish_tracking3Mar21shuffle1_300000.h5"
+    path = "/home/efish/efish_tracking/efish_tracking3-Xaver-2022-03-21/videos"
 
+    tr = TrackingResult(path+filename)  # usage of class with given file
+    time, x, y, l, bp = tr.position_values(bodypart=2)  # time, x and y values, likelihood of position estimation, tracked bodypart
+    phi = tr.angle_to_center(0, True, False, 0.95)
 
     thresh = 0.95
-    time2 = time[l>thresh]
-    x2 = x[l>thresh]
-    y2 = y[l>thresh]
-    x3 = np.interp(time, time2, x2)
-    y3 = np.interp(time, time2, y2)
+    time2 = time[l>thresh]  # time values where likelihood of position estimation > threshold
+    x2 = x[l>thresh]    # x values with likelihood > threshold
+    y2 = y[l>thresh]    # y values -"-
+    x3 = np.interp(time, time2, x2) # x value interpolation at points where likelihood has been under threshold
+    y3 = np.interp(time, time2, y2) # y value -"- 
 
 
     fig, axes = plt.subplots(3,1, sharex=True)                                                                                                                                                  
-    axes[0].plot(time, x)    
+    axes[0].plot(time, x)
     axes[0].plot(time, x3)                                                                                                                                                                   
+    axes[0].set_ylabel('x-position')
     axes[1].plot(time, y)
     axes[1].plot(time, y3)                                                                                                                                                                       
-    axes[2].plot(time, l)                            
+    axes[1].set_ylabel('y-position')
+    axes[2].plot(time, l)
+    axes[2].set_xlabel('time [s]')    
+    axes[2].set_ylabel('likelihood')                            
     plt.show()
 
     embed()
