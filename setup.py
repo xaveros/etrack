@@ -5,7 +5,7 @@ VERSION = 0.5
 AUTHOR = "Jan Grewe"
 CONTACT = "jan.grewe@g-node.org"
 CLASSIFIERS = "science"
-DESCRIPTION = "helpers for handling depp lab cut tracking results"
+DESCRIPTION = "helpers for handling deep lab cut tracking results"
 
 README = "README.md"
 with open(README) as f:
