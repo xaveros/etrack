@@ -20,7 +20,7 @@ class ImageMarker:
         self._fig.canvas.mpl_connect('close_event', self._fig_close_event)
         self._fig.canvas.mpl_connect('key_press_event', self._key_press_event)
     
-    def mark_movie(self, filename, frame_number=0):
+    def mark_movie(self, filename, frame_number=10):
         """ Interactive GUI to mark the corners of the tank. A specific frame of the video can be chosen. Returns marker positions.
 
         Args:
@@ -161,7 +161,7 @@ if __name__ == "__main__":
     im = ImageMarker(tasks)
 
     vid1 = "/home/efish/efish_tracking/efish_tracking3-Xaver-2022-03-21/videos/2022.01.12_3DLC_resnet50_efish_tracking3Mar21shuffle1_300000_labeled.mp4"
-    marker_positions = im.mark_movie(vid1, 100)
+    marker_positions = im.mark_movie(vid1, 10)
     print(marker_positions)
     
     # print(sys.argv[0])
