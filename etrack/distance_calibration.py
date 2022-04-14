@@ -1,6 +1,7 @@
 from multiprocessing import allow_connection_pickling
 from turtle import left
-from cv2 import MARKER_TRIANGLE_UP, calibrationMatrixValues, threshold
+from xml.dom.expatbuilder import FILTER_ACCEPT
+from cv2 import MARKER_TRIANGLE_UP, calibrationMatrixValues, mean, threshold
 import matplotlib.pyplot as plt 
 import numpy as np
 import cv2
@@ -8,6 +9,7 @@ import os
 import sys
 from IPython import embed
 from etrack import MarkerTask, ImageMarker
+from calibration_functions import crop_frame, threshold_crossings, checkerboard_position, filter_data
 
 
 class DistanceCalibration():
@@ -51,8 +53,10 @@ class DistanceCalibration():
         self._x_factor = self.width / self.width_pix   # m/pix
         self._y_factor = self.height / self.height_pix # m/pix
 
-        self.mark_crop_positions
-        self.threshold_crossings
+        # self.mark_crop_positions
+        # self.threshold_crossings
+        # self.checkerboard_position
+        # self.filter_data
 
     @property
     def x_0(self):
@@ -143,72 +147,6 @@ class DistanceCalibration():
         return marker_positions
 
 
-    def crop_frame(self, frame, marker_positions):
-
-        bottom_left = marker_positions[0]['bottom left corner']
-        bottom_right = marker_positions[0]['bottom right corner']
-        top_left = marker_positions[0]['top left corner']
-        top_right = marker_positions[0]['top right corner']
-
-        left_bound = int(np.mean([bottom_left[0], top_left[0]]))
-        right_bound = int(np.mean([bottom_right[0], top_right[0]]))
-        top_bound = int(np.mean([top_left[1], top_right[1]]))
-        bottom_bound = int(np.mean([bottom_left[1], bottom_right[1]]))
-        
-        crop_frame = frame[top_bound:bottom_bound, left_bound:right_bound]
-        crop_frame = np.mean(crop_frame, axis=2)
-
-        frame_width = np.mean(crop_frame,axis=0)
-        frame_height = np.mean(crop_frame,axis=1)
-
-        diff_width = np.diff(frame_width)
-        diff_height = np.diff(frame_height)
-
-        x_width = np.arange(0, len(diff_width), 1)
-        x_height = np.arange(0, len(diff_height), 1)
-        return frame_width, frame_height, diff_width, diff_height, x_width, x_height
-
-
-    def rotation_angle():
-        pass
-
-
-    def threshold_crossings(self, data, threshold_factor):
-        lower_threshold = np.min(data) / threshold_factor
-        upper_threshold = np.max(data) / threshold_factor
-        
-        lower_crossings = np.diff(data < lower_threshold, prepend=False)
-        upper_crossings = np.diff(data > upper_threshold, append=False)
-        
-        lower_crossings_indices = np.argwhere(lower_crossings)
-        upper_crossings_indices = np.argwhere(upper_crossings)
-        
-        half_window_size = 10
-        lower_peaks = []
-        upper_peaks = []
-        for lower_idx in lower_crossings_indices:
-            if lower_idx < half_window_size:
-                half_window_size = lower_idx
-            window = data[lower_idx[0] - int(half_window_size):lower_idx[0] + int(half_window_size)]
-            min_window = np.min(window)
-            min_idx = np.where(data == min_window)
-            lower_peaks.append(min_idx)
-
-        for upper_idx in upper_crossings_indices:
-            if upper_idx < half_window_size:
-                half_window_size = upper_idx
-            window = data[upper_idx[0] -  int(half_window_size) : upper_idx[0] + int(half_window_size)]
-            
-            max_window = np.max(window)
-            max_idx = np.where(data == max_window)
-            upper_peaks.append(max_idx)    
-        
-        lower_peaks = np.unique(lower_peaks)
-        upper_peaks = np.unique(upper_peaks)
-               
-        return lower_peaks, upper_peaks
-
-
     def detect_checkerboard(self, filename, frame_number, marker_positions):
         
         if not os.path.exists(filename):
@@ -229,71 +167,78 @@ class DistanceCalibration():
             success, frame = video.read()
             frame_counter += 1
 
-        marker_positions = np.load('marker_positions.npy', allow_pickle=True)
+        marker_positions = np.load('marker_positions.npy', allow_pickle=True)   # load saved numpy marker positions file
+        bottom_left_marker = marker_positions[0]['bottom left corner']
+        bottom_right_marker= marker_positions[0]['bottom right corner']
+        top_left_marker = marker_positions[0]['top left corner']
+        top_right_marker = marker_positions[0]['top right corner']
 
-        frame_width, frame_height, diff_width, diff_height, _, _ = dc.crop_frame(frame, marker_positions)
+        # care: y-axis is inverted, top values are low, bottom values are high
+
+        frame_width, frame_height, diff_width, diff_height, _, _ = crop_frame(frame, marker_positions)   # crop frame to given marker positions
         
-        # y-axis is inverted..        
+        thresh_fact = 7    # factor by which the min/max is divided to calculate the upper and lower thresholds 
         
-        thresh_fact = 7
-        lci_width, uci_width = dc.threshold_crossings(diff_width, threshold_factor=thresh_fact)
-        lci_height, uci_height = dc.threshold_crossings(diff_height, threshold_factor=thresh_fact)
+        # filtering/smoothing of data using kernel with n datapoints
+        kernel = 4
+        diff_width = filter_data(diff_width, n=kernel)  # for widht (x-axis)
+        diff_height = filter_data(diff_height, n=kernel)    # for height (y-axis)
+
+        # input data is derivation of color values of frame
+        lci_width, uci_width = threshold_crossings(diff_width, threshold_factor=thresh_fact)     # threshold crossings (=edges of checkerboard) for width (x-axis)
+        lci_height, uci_height = threshold_crossings(diff_height, threshold_factor=thresh_fact)  # ..for height (y-axis)
         
         print('lower crossings:', lci_width)
         print('upper crossings:', uci_width)
 
-        # make function for this
-        zip_list = []
-        for zl in lci_width:
-            zip_list.append(zl)
-        for zu in uci_width:
-            zip_list.append(zu)
+        print('width..')
+        width_position, left_width_position, right_width_position = checkerboard_position(lci_width, uci_width)
+        print('height..')
+        height_position, left_height_position, right_height_position = checkerboard_position(lci_height, uci_height)  # check if working
         
-        zip_list = np.sort(zip_list)
+        top_left = np.array([left_width_position, left_height_position])
+        top_right = np.array([right_width_position, left_height_position])
+        bottom_left = np.array([left_width_position, right_height_position])
+        bottom_right = np.array([right_width_position, right_height_position])
 
-        sequence = []
-        for z in zip_list:
-            if z in lci_width:
-                sequence.append('down')
-            else:
-                sequence.append('up')
-        print('sequence:', sequence)
-
-        if sequence == ['up', 'down', 'up', 'down']:
-            print('in middle')
-            # first down, second up are edges of checkerboard
-        elif sequence == ['up', 'up', 'down']:
-            print('at left')
-            # first and second up are edges of checkerboard
-        else:
-            print('at right')
-            # first and second down are edges of checkerboard
+        print(top_left, top_right, bottom_left, bottom_right)
+        fig, ax = plt.subplots()
+        ax.imshow(frame)
+        # ax.autoscale(False)
+        for p in top_left, top_right, bottom_left, bottom_right:
+            ax.scatter(p[0], p[1])
+        ax.set_xlim(bottom_left_marker[0], bottom_right_marker[0])
+        ax.set_ylim(bottom_left_marker[1], top_left_marker[1])
+        # plt.show()
         
-        # find mistake in threshold detection (_7.mp4) where two detections at side (by thresh factor)
+        # locations of checkerboard position do not yet fit the ones of the frame yet (visually checked)
+
+        # embed()
+        # quit()
         # find which indices (=pixels) represent edges of checkerboard by the corresponding sequence of ups and downs
         # both for width and height
         # assign x and y positions for the checkerboard corners
 
         # pixel to meter factor for default position with checkerboard in center of tank underneath camera
         
+        # plt.plot(diff_width)
         plt.plot(diff_width)
-        plt.axhline(np.min(diff_width) / thresh_fact)
-        plt.axhline(np.max(diff_width) / thresh_fact)
+        # plt.axhline(np.min(diff_height) / thresh_fact)
+        # plt.axhline(np.max(diff_height) / thresh_fact)
         for l in lci_width:
             plt.axvline(l, color='yellow')
         for u in uci_width:
             plt.axvline(u, color='green')
-        # plt.plot(frame_height)
-        plt.plot(frame_width)
+        # plt.plot(frame_width, label='height')
+        # plt.plot(frame_width, label='width')
+        plt.legend()
         plt.show()
         embed()
         quit()
         
-        # rotation angle
-        
-      
+
 if __name__ == "__main__":    
-    file_name = "/home/efish/etrack/videos/2022.03.28_7.mp4"
+    file_name = "/home/efish/etrack/videos/2022.03.28_3.mp4"
     frame_number = 10
     dc = DistanceCalibration(file_name=file_name, frame_number=frame_number)
     
